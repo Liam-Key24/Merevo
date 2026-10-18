@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getClientIp, hashIp } from '@/lib/clientIp'
+import { isPlainObject } from '@/lib/isPlainObject'
 import { assertLeadRateLimit } from '@/lib/leadRateLimit'
 import { isValidLeadBusinessType } from '@/lib/leadBusinessTypes'
 import {
@@ -58,7 +59,11 @@ export async function POST(request: Request) {
   let body: LeadBody
 
   try {
-    body = (await request.json()) as LeadBody
+    const parsed: unknown = await request.json()
+    if (!isPlainObject(parsed)) {
+      return safeError('Invalid request body.', 400)
+    }
+    body = parsed as LeadBody
   } catch {
     return safeError('Invalid request body.', 400)
   }

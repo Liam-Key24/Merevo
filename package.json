@@ -1,5 +1,5 @@
 {
-  "name": "meridian",
+  "name": "mevero",
   "private": true,
   "version": "1.0.0",
   "scripts": {
@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "verify:lead-idempotency": "node --env-file=.env.local scripts/verify-lead-idempotency.mjs",
     "newsletter:preview": "node scripts/preview-newsletter.mjs",
-    "newsletter:send": "node --env-file=.env.local scripts/send-newsletter.mjs"
+    "newsletter:send": "node --env-file=.env.local scripts/send-newsletter.mjs",
+    "test:api-body": "tsx --test src/app/api/json-body-guard.test.ts"
   },
   "dependencies": {
     "@marsidev/react-turnstile": "^1.6.0",
@@ -31,6 +32,7 @@
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.3.2",
     "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3"
   }
 }
