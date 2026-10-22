@@ -1,15 +1,51 @@
-import assert from 'node:assert/strict'
-import { describe, test } from 'node:test'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { isPlainObject } from '@/lib/isPlainObject'
 import { POST as analyticsPost } from './analytics/route'
 
+vi.mock('@/lib/verifyTurnstile', () => ({
+  verifyTurnstileToken: vi.fn(async () => true),
+}))
+
+vi.mock('@/lib/leadRateLimit', () => ({
+  assertLeadRateLimit: vi.fn(async () => ({
+    success: true,
+    remaining: 4,
+    reset: Date.now() + 60_000,
+  })),
+}))
+
+vi.mock('@/lib/supabaseAdmin', () => ({
+  getSupabaseAdmin: vi.fn(() => ({ mocked: true })),
+}))
+
+vi.mock('@/lib/leadSubmission', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/leadSubmission')>()
+  return {
+    ...actual,
+    createOrGetLeadByIdempotencyKey: vi.fn(async (_supabase, input) => ({
+      lead: {
+        id: 'lead-test-id',
+        name: input.name,
+        email: input.email,
+        business_name: input.businessName || null,
+        business_type: input.businessType || null,
+        message: input.message,
+        idempotency_key: input.idempotencyKey,
+      },
+      created: true,
+    })),
+    ensureLeadEmailsOnce: vi.fn(async () => undefined),
+    getLeadEmailDeliveryState: vi.fn(async () => 'sent' as const),
+  }
+})
+
 describe('isPlainObject', () => {
-  test('accepts plain objects only', () => {
-    assert.equal(isPlainObject({ a: 1 }), true)
-    assert.equal(isPlainObject(null), false)
-    assert.equal(isPlainObject([]), false)
-    assert.equal(isPlainObject('x'), false)
-    assert.equal(isPlainObject(1), false)
+  it('accepts plain objects only', () => {
+    expect(isPlainObject({ a: 1 })).toBe(true)
+    expect(isPlainObject(null)).toBe(false)
+    expect(isPlainObject([])).toBe(false)
+    expect(isPlainObject('x')).toBe(false)
+    expect(isPlainObject(1)).toBe(false)
   })
 })
 
@@ -20,41 +56,71 @@ describe('analytics POST body guard', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-      })
+      }),
     )
   }
 
-  test('rejects null, arrays, and scalars with 400', async () => {
+  it('rejects null, arrays, and scalars with 400', async () => {
     for (const bad of [null, [], 'x', 1]) {
       const res = await post(bad)
-      assert.equal(res.status, 400, `expected 400 for ${JSON.stringify(bad)}`)
+      expect(res.status, `expected 400 for ${JSON.stringify(bad)}`).toBe(400)
       const json = (await res.json()) as { error: string }
-      assert.equal(json.error, 'Invalid body')
+      expect(json.error).toBe('Invalid body')
     }
   })
 
-  test('accepts a valid event body', async () => {
+  it('accepts a valid event body', async () => {
     const res = await post({ event: 'cta_click', props: { page: 'home' } })
-    assert.equal(res.status, 200)
+    expect(res.status).toBe(200)
     const json = (await res.json()) as { ok: boolean }
-    assert.equal(json.ok, true)
+    expect(json.ok).toBe(true)
   })
 })
 
 describe('leads POST body guard', () => {
-  test('rejects null, arrays, and scalars with 400', async () => {
+  beforeEach(() => {
+    process.env.LEAD_IP_HASH_SALT = 'test-salt'
+    vi.clearAllMocks()
+  })
+
+  async function post(body: unknown) {
     const { POST: leadsPost } = await import('./leads/route')
+    return leadsPost(
+      new Request('http://localhost/api/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    )
+  }
+
+  it('rejects null, arrays, and scalars with 400', async () => {
     for (const bad of [null, [], 'x', 1]) {
-      const res = await leadsPost(
-        new Request('http://localhost/api/leads', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(bad),
-        })
-      )
-      assert.equal(res.status, 400, `expected 400 for ${JSON.stringify(bad)}`)
+      const res = await post(bad)
+      expect(res.status, `expected 400 for ${JSON.stringify(bad)}`).toBe(400)
       const json = (await res.json()) as { error: string }
-      assert.equal(json.error, 'Invalid request body.')
+      expect(json.error).toBe('Invalid request body.')
     }
+  })
+
+  it('accepts a valid lead body', async () => {
+    const res = await post({
+      name: 'Ada Lovelace',
+      email: 'ada@example.com',
+      businessName: 'Analytical Engines',
+      businessType: 'other',
+      message: 'Looking for a booking demo next week.',
+      turnstileToken: 'test-turnstile-token',
+      idempotencyKey: '11111111-1111-4111-8111-111111111111',
+    })
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as {
+      ok: boolean
+      id: string
+      confirmationDelivery: string
+    }
+    expect(json.ok).toBe(true)
+    expect(json.id).toBe('lead-test-id')
+    expect(json.confirmationDelivery).toBe('sent')
   })
 })
