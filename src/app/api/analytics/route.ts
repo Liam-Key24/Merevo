@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { isPlainObject } from '@/lib/isPlainObject'
 
 const ALLOWED_EVENTS = new Set([
   'cta_click',
@@ -15,7 +16,11 @@ export async function POST(request: Request) {
   let body: AnalyticsBody
 
   try {
-    body = (await request.json()) as AnalyticsBody
+    const parsed: unknown = await request.json()
+    if (!isPlainObject(parsed)) {
+      return NextResponse.json({ error: 'Invalid body' }, { status: 400 })
+    }
+    body = parsed as AnalyticsBody
   } catch {
     return NextResponse.json({ error: 'Invalid body' }, { status: 400 })
   }
